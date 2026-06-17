@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Duolingo Tree Engine - Academic Edition</title>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800;900&display=swap" rel="stylesheet">
+    
+    <style>
+        /* --- DESIGN TOKENS --- */
+        :root {
+            --duo-green: #58cc02;
+            --duo-green-dark: #46a302;
+            --duo-green-light: #eefbe7;
+            --duo-gray: #afafaf;
+            --duo-gray-dark: #777777;
+            --duo-border: #e5e5e5;
+            --duo-text: #3c3c3c;
+            --duo-blue: #1cb0f6;
+            --glass-bg: rgba(255, 255, 255, 0.85);
+            --shadow-sm: 0 4px 12px rgba(0,0,0,0.04);
+            --shadow-lg: 0 20px 40px rgba(0,0,0,0.06);
+            --bounce-easing: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            --smooth-easing: cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        /* --- RESET & FOUNDATION --- */
+        * { 
+            box-sizing: border-box; 
+            margin: 0; 
+            padding: 0; 
+            font-family: 'Nunito', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        html, body { height: 100%; width: 100%; overflow: hidden; background-color: #f7f9fa; color: var(--duo-text); }
+        .app-layout { display: flex; flex-direction: column; height: 100vh; width: 100vw; position: relative; z-index: 1; }
+
+        /* Particle Canvas Layer */
+        #confetti-canvas {
+            position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+            pointer-events: none; z-index: 9999;
+        }
+
+        /* --- TOP ZONE: IMMERSIVE FULL-VIEWPORT VIDEO --- */
+        .tree-viewport {
+            background-color: #111111;
+            flex: 2.2; 
+            position: relative; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center;
+            border-bottom: 2px solid var(--duo-border); 
+            overflow: hidden;
+        }
+
+        .video-wrapper {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 1; background: #111; display: flex; align-items: center; justify-content: center;
+        }
+
+        #tree-video { display: block; width: 100%; height: 100%; object-fit: cover; }
+
+        /* Floating HUD elements */
+        .viewport-hud {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 5; pointer-events: none;
+        }
+
+        .hanging-card {
+            position: absolute; top: 0; background: #ffffff;
+            border: 2px solid var(--duo-border); border-top: none;
+            padding: 12px 20px; border-radius: 0 0 16px 16px;
+            box-shadow: var(--shadow-sm); display: flex; align-items: center; gap: 12px;
+            pointer-events: auto;
+        }
+        .hanging-card-left { left: 40px; }
+        .hanging-card-right { right: 40px; width: 280px; }
+        
+        .card-icon {
+            background: var(--duo-green-light); border-radius: 50%; width: 36px; height: 36px;
+            display: flex; align-items: center; justify-content: center; color: var(--duo-green-dark);
+        }
+        .card-info h3 { font-size: 0.7rem; color: var(--duo-gray); text-transform: uppercase; font-weight: 800; letter-spacing: 0.8px; }
+        .card-info p { font-size: 1rem; font-weight: 900; color: var(--duo-text); }
+
+        /* Progress Bar */
+        .xp-wrapper { flex-grow: 1; }
+        .xp-meta { display: flex; justify-content: flex-end; font-weight: 800; font-size: 0.8rem; margin-bottom: 4px; color: var(--duo-gray-dark); }
+        .bar-rail { background: var(--duo-border); height: 12px; border-radius: 99px; overflow: hidden; }
+        .bar-fill {
+            height: 100%; width: 0%; border-radius: 99px;
+            background: repeating-linear-gradient(-45deg, var(--duo-green), var(--duo-green) 12px, #68e305 12px, #68e305 24px);
+            background-size: 34px 34px; animation: moveStripes 1s linear infinite;
+            transition: width 0.8s var(--bounce-easing);
+        }
+        @keyframes moveStripes { 100% { background-position: 34px 0; } }
+
+        /* Error state overlay */
+        .video-error-state {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(42, 42, 42, 0.95); color: white; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; text-align: center; padding: 20px;
+            font-size: 0.9rem; font-weight: 700; z-index: 10; opacity: 0; transition: opacity 0.3s;
+            pointer-events: none;
+        }
+        .video-error-state.visible { opacity: 1; pointer-events: auto; }
+
+        /* Greyish AI Scanner Overlay */
+        .scan-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(240, 242, 245, 0.9); backdrop-filter: blur(4px);
+            display: none; justify-content: center; align-items: center; z-index: 100; overflow: hidden;
+        }
+        .scanner-laser {
+            position: absolute; width: 100%; height: 2px; background: var(--duo-blue);
+            box-shadow: 0 0 15px 4px rgba(28, 176, 246, 0.4); animation: scanSweeper 1.2s ease-in-out infinite alternate;
+        }
+        @keyframes scanSweeper { 0% { top: 5%; opacity: 0; } 10%, 90% { opacity: 1; } 100% { top: 95%; opacity: 0; } }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        
+        .scan-card {
+            background: white; padding: 24px 44px; border-radius: 20px; border: 1px solid var(--duo-border);
+            text-align: center; font-weight: 800; color: var(--duo-gray-dark); position: relative; z-index: 2; box-shadow: var(--shadow-sm);
+        }
+
+        /* --- BOTTOM ZONE: SQUISH-PROOF TASKS --- */
+        .tasks-container {
+            background-color: #ffffff; flex: 1; padding: 24px 40px 0px 40px;
+            display: flex; flex-direction: column; position: relative; overflow: hidden; z-index: 10;
+        }
+
+        .tasks-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; font-size: 1.4rem; font-weight: 900; letter-spacing: -0.3px; }
+        
+        .scrollable-task-stream {
+            display: flex; flex-direction: column; gap: 14px; overflow-y: auto; flex-grow: 1; padding: 4px 4px 80px 4px;
+            -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 3%, black 88%, transparent 100%);
+            mask-image: linear-gradient(to bottom, transparent 0%, black 3%, black 88%, transparent 100%);
+        }
+        .scrollable-task-stream::-webkit-scrollbar { width: 6px; }
+        .scrollable-task-stream::-webkit-scrollbar-track { background: transparent; }
+        .scrollable-task-stream::-webkit-scrollbar-thumb { background: var(--duo-border); border-radius: 10px; }
+
+        .minimal-task-card {
+            flex-shrink: 0; min-height: 80px; background: #ffffff; border: 2px solid var(--duo-border); border-bottom: 4px solid var(--duo-border);
+            border-radius: 16px; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center;
+            position: relative; overflow: hidden; opacity: 0; transform: translateY(30px);
+            animation: slideUpFade 0.5s var(--bounce-easing) forwards; transition: transform 0.2s ease, border-color 0.2s;
+        }
+        @keyframes slideUpFade { to { opacity: 1; transform: translateY(0); } }
+
+        .minimal-task-card::before {
+            content: ""; position: absolute; top: 0; left: -100%; width: 100%; height: 100%;
+            background: var(--duo-green-light); transition: left 0.35s var(--smooth-easing); z-index: 0;
+        }
+        .minimal-task-card:hover:not(.completed) { border-color: #d4d4d4; transform: translateY(-2px); }
+        .minimal-task-card:hover:not(.completed)::before { left: 0; }
+        .minimal-task-card > * { position: relative; z-index: 1; }
+
+        .minimal-task-card.completed {
+            background: #f0f9ff; border-color: var(--duo-blue); border-bottom-width: 2px;
+            transform: scale(0.98); pointer-events: none;
+        }
+        .minimal-task-card.completed::before { display: none; }
+
+        .task-info-block { display: flex; align-items: center; gap: 16px; width: 70%; }
+        .task-icon { color: var(--duo-gray); display: flex; align-items: center; }
+        .task-headline h4 { font-size: 1.1rem; font-weight: 800; color: var(--duo-text); line-height: 1.2; }
+        .task-headline p { font-size: 0.9rem; color: var(--duo-gray-dark); font-weight: 700; margin-top: 4px; }
+        
+        /* Professional Feedback Styling */
+        .task-headline .pro-feedback { 
+            font-size: 0.9rem; 
+            color: var(--duo-blue); 
+            font-weight: 700; 
+            margin-top: 8px; 
+            display: block; 
+            border-left: 3px solid var(--duo-blue); 
+            padding-left: 10px; 
+            line-height: 1.4;
+        }
+        
+        .xp-label { color: var(--duo-green-dark); font-weight: 900; }
+
+        /* Action Buttons */
+        .action-camera-btn {
+            background: #ffffff; color: var(--duo-text); border: 2px solid var(--duo-border);
+            border-bottom: 4px solid var(--duo-border); padding: 10px 18px; font-size: 0.9rem;
+            font-weight: 800; border-radius: 14px; cursor: pointer; display: flex; align-items: center; gap: 8px;
+            transition: all 0.1s var(--bounce-easing); white-space: nowrap; outline: none;
+        }
+        .action-camera-btn:hover { transform: scale(1.03); border-color: var(--duo-gray); }
+        .action-camera-btn:active { border-bottom-width: 0px; transform: translateY(4px) scale(0.97); }
+        .action-camera-btn.verified {
+            background: var(--duo-blue) !important; color: #ffffff !important; border: 2px solid #1899d6 !important;
+            border-bottom: 4px solid #1899d6 !important; cursor: default; transform: none !important;
+        }
+
+        /* --- MODALS (Alerts) --- */
+        .modal-backdrop {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5); z-index: 10000; display: none;
+            justify-content: center; align-items: center; padding: 20px;
+        }
+        .modal {
+            background: white; border-radius: 24px; padding: 30px; width: 100%; max-width: 400px;
+            box-shadow: var(--shadow-lg); border: 2px solid var(--duo-border);
+        }
+        
+        /* Pop Animations for the Modal */
+        @keyframes popIn {
+            0% { transform: scale(0.8); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        @keyframes popOut {
+            0% { transform: scale(1); opacity: 1; }
+            100% { transform: scale(0.8); opacity: 0; }
+        }
+
+        .modal h2 { margin-bottom: 12px; font-weight: 900; letter-spacing: -0.5px; }
+        .save-btn {
+            background: #1cb0f6; color: white; border: none; border-bottom: 4px solid #1899d6;
+            padding: 12px; width: 100%; border-radius: 12px; font-weight: 800; font-size: 1rem; cursor: pointer;
+        }
+        .save-btn:active { border-bottom-width: 0px; transform: translateY(4px); }
+
+        .hidden-uploader { display: none; }
+    </style>
+</head>
+<body>
+
+    <input type="file" id="camera-bridge" class="hidden-uploader" accept="image/*" capture="environment">
+
+    <canvas id="confetti-canvas"></canvas>
+
+    <div class="modal-backdrop" id="custom-alert-backdrop" style="z-index: 10001;">
+        <div class="modal" style="text-align: center;">
+            <h2 id="custom-alert-title">Alert</h2>
+            <p id="custom-alert-message" style="color: var(--duo-gray-dark); margin-bottom: 24px; font-size: 1rem; line-height: 1.5;"></p>
+            <button class="save-btn" onclick="app.closeAlert()">Understood</button>
+        </div>
+    </div>
+
+    <div class="app-layout">
+        
+        <div class="tree-viewport">
+            
+            <div class="video-wrapper">
+                <div class="video-error-state" id="video-error">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#ff4b4b" stroke-width="2" style="margin-bottom:8px;"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                    Media Blocked.<br>
+                    Please verify file path in static folder.
+                </div>
+                
+                <video id="tree-video" muted playsinline preload="auto">
+                    <source src="../static/download.mp4" type="video/mp4">
+                </video>
+            </div>
+
+            <div class="viewport-hud">
+                <div class="hanging-card hanging-card-left">
+                    <div class="card-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></div>
+                    <div class="card-info"><h3>Current Plan</h3><p id="stage-display-name">Evergreen Oak</p></div>
+                </div>
+
+                <div class="hanging-card hanging-card-right">
+                    <div class="card-icon" style="background: #eefbe7; color: #58cc02;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"></path><path d="M12 17v4"></path><path d="M7 4h10"></path><path d="M17 4v8a5 5 0 0 1-10 0V4"></path><path d="M4 4h3"></path><path d="M17 4h3"></path></svg></div>
+                    <div class="xp-wrapper">
+                        <div class="xp-meta"><span id="xp-text">0 / 100 XP</span></div>
+                        <div class="bar-rail"><div class="bar-fill" id="xp-bar"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="scan-overlay" id="loader-overlay">
+                <div class="scanner-laser"></div>
+                <div class="scan-card">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--duo-gray)" stroke-width="2.5" style="margin-bottom: 8px; animation: spin 1.5s linear infinite;"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>
+                    <p id="loader-text" style="font-size: 1rem; letter-spacing: 0.5px;">Uploading Asset...</p>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="tasks-container">
+            <div class="tasks-header">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                Daily Quests
+            </div>
+            <div class="scrollable-task-stream" id="task-feed"></div>
+        </div>
+
+    </div>
+
+    <script>
+        const CONFIG = {
+            maxXP: 100,
+            maxStage: 4,
+            stageTimestamps: {
+                1: { start: 0.0, end: 0.5 },
+                2: { start: 0.5, end: 1.0 },
+                3: { start: 1.0, end: 1.5 },
+                4: { start: 1.5, end: 2.0 }
+            }
+        };
+
+        // Your complete question sets mapped out with specific point allocations
+        const easyTasks = {
+            1: { task: "Set your phone to 'Focus Mode' during study hours.", proof: "Screenshot of your phone's active Focus Mode home screen." },
+            2: { task: "Set an alarm reminding you to pack your bag the night before.", proof: "Screenshot of your phone's alarm list showing a PM reminder." },
+            3: { task: "Turn off all non-human notifications (games, apps, news).", proof: "Screenshot of your phone's notification settings dashboard." },
+            4: { task: "Check your student bank balance to ensure no fraudulent subscriptions.", proof: "Cropped screenshot of your mobile banking app dashboard." },
+            5: { task: "Open your bedroom blinds completely to maximize natural daylight.", proof: "Photo of your sunlit study space taken from the doorway." },
+            6: { task: "Clean your water bottle thoroughly with soap and warm water.", proof: "Photo of your washed bottle drying on the dish rack." },
+            7: { task: "Empty your bedroom trash can before it overflows.", proof: "Photo of your completely empty, lined trash bin." },
+            8: { task: "Make your bed perfectly immediately after waking up.", proof: "Photo of your neat, made bed before leaving for class." },
+            9: { task: "Drink a full 500ml glass of water before touching morning caffeine.", proof: "Photo of an empty water glass next to your morning mug." },
+            10: { task: "Put your phone charger across the room so you have to stand up to turn off your alarm.", proof: "Photo of your phone resting far away from your nightstand." },
+            11: { task: "Wash your face and apply moisturizer before going to sleep.", proof: "Photo of your evening skincare items standing by your bathroom sink." },
+            12: { task: "Fill your reusable water bottle to the top before your first morning class.", proof: "Photo of your full bottle sitting next to your laptop or notebook." },
+            13: { task: "Walk up the stairs instead of using the campus elevator or escalator.", proof: "Photo looking up or down the campus stairwells." },
+            14: { task: "Clean your eyeglasses or blue-light blocking glasses.", proof: "Photo of your crystal-clear glasses resting on a cleaning cloth." },
+            15: { task: "Form or join a study group chat for a difficult course.", proof: "Screenshot of the group chat creation and participant list." },
+            16: { task: "Send a supportive, encouraging text message to a stressed classmate.", proof: "Screenshot of your sent text message." },
+            17: { task: "Sit completely still in silence for 5 minutes without any background music.", proof: "Screenshot of a countdown timer at 00:00." },
+            18: { task: "Wipe down frequently touched items (phone, door handles, keys).", proof: "Photo of disinfectant wipes next to your wiped-down items." },
+            19: { task: "Check the weather forecast for the week to plan your outfits and umbrellas.", proof: "Screenshot of your local weekly weather app layout." },
+            20: { task: "Unplug all room electronics and chargers before leaving for a weekend trip.", proof: "Photo of your empty, unplugged wall outlets or power strips." },
+            21: { task: "Turn off the tap water tightly while brushing your teeth.", proof: "Photo of you brushing your teeth with the faucet handle firmly shut." },
+            22: { task: "Create a professional-sounding email signature for your student account.", proof: "Screenshot of your email settings signature textbox preview." },
+            23: { task: "Listen to your ultimate high-energy 'hype playlist' while getting ready.", proof: "Screenshot of the track selection screen on your music platform." },
+            24: { task: "Clip, file, and cleanly maintain your fingernails.", proof: "Photo of your clean, manicured hands resting flat on your desk." },
+            25: { task: "Give yourself a 5-minute temple and neck massage using soothing lotion.", proof: "Photo of your lotion bottle or massage tools resting by your desk space." }
+        };
+
+        const mediumTasks = {
+            26: { task: "Block distracting websites for a 2-hour study block.", proof: "Screenshot of an app blocker active screen." },
+            27: { task: "Use a Pomodoro timer to study for 25 minutes without looking away.", proof: "Screenshot of the completed 25-minute timer screen." },
+            28: { task: "Use a task manager app to break a massive project into 5 small steps.", proof: "Screenshot of your Todoist, Trello, or Apple Reminders list." },
+            29: { task: "Check your student portal grades without looking at social media first.", proof: "Screenshot of the student portal page open at your morning wake time." },
+            30: { task: "Unsubscribe from 5 retail or junk email lists cluttering your inbox.", proof: "Screenshot of the 'You have successfully unsubscribed' confirmation pages." },
+            31: { task: "Move all social media apps off your phone's first home screen page.", proof: "Screenshot of your blank or utility-only first home screen." },
+            32: { task: "Set your phone screen to black-and-white (grayscale mode) after 9 PM.", proof: "Accessibility settings panel screenshot showing grayscale active." },
+            33: { task: "Complete a 10-minute guided meditation on a free mindfulness app.", proof: "Screenshot of the 'Session Complete' summary page." },
+            34: { task: "Cancel a digital subscription you no longer use or cannot afford.", proof: "Screenshot of the cancellation confirmation screen." },
+            35: { task: "Research and find 3 student discounts you can use this month.", proof: "Screenshot of the discount pages or a student discount portal." },
+            36: { task: "Clear everything off your desk except your current study materials.", proof: "Photo of your clean, minimalist desk layout." },
+            37: { task: "Clean your laptop keyboard and wipe down your screen.", proof: "Photo of your sparkling clean laptop alongside microfibre cloths." },
+            38: { task: "Set up an ergonomic laptop stand or stack books to elevate your screen.", proof: "Eye-level photo showing your screen directly at eye level." },
+            39: { task: "Throw away all dead pens, dried markers, and scraps from your pencil case.", proof: "Photo of your working stationery items organized inside the case." },
+            40: { task: "Prepare a healthy snack bag for tomorrow's long lecture day.", proof: "Photo of sliced fruit, nuts, or veggie sticks in a container." },
+            41: { task: "Lay out your clothes and shoes for tomorrow morning.", proof: "Photo of tomorrow's outfit ready on a chair or hanger." },
+            42: { task: "Light a calming candle or diffuse essential oils while reading.", proof: "Photo of your lit candle or running diffuser next to your notebook." },
+            43: { task: "Brew a cup of caffeine-free herbal tea before bed.", proof: "Photo of your steaming mug of chamomile, peppermint, or ginger tea." },
+            44: { task: "Swap your desk chair for a stability ball or use a standing desk for an hour.", proof: "Photo of you using the alternative setup or a photo of the desk raised." },
+            45: { task: "Do a 5-minute full-body stretch on a yoga mat between classes.", proof: "Photo of your yoga mat laid out flat on the bedroom floor." },
+            46: { task: "Park your car or get off the bus further away to get extra steps.", proof: "Photo of a campus landmark you passed during your longer walk." },
+            47: { task: "Swap a sugary soda or energy drink for sparkling or plain water.", proof: "Photo of your water bottle or can of plain sparkling water." },
+            48: { task: "Go to bed before midnight on a weekday.", proof: "Photo of a physical clock or watch displaying a time before 12:00 AM." },
+            49: { task: "Study alongside a friend or classmate in the library.", proof: "Photo of two study setups side-by-side on a library table." },
+            50: { task: "Eat lunch with a friend or classmate instead of eating alone at your desk.", proof: "Photo of two meal containers or plates across a cafeteria table." },
+            51: { task: "Introduce yourself to someone new sitting next to you in a lecture.", proof: "Selfie with your new classmate or a photo of your adjacent desks." },
+            52: { task: "Ask a classmate for clarification on a topic you didn't understand.", proof: "Screenshot of the question text message or email thread." },
+            53: { task: "Write a physical thank-you note to a teacher, professor, or roommate.", proof: "Photo of the handwritten note before you hand it over." },
+            54: { task: "Book an appointment with the campus writing center or tutoring service.", proof: "Screenshot of the digital appointment confirmation email." },
+            55: { task: "Find a quiet, hidden study spot on campus you’ve never used before.", proof: "Photo of the view from your newly discovered study nook." },
+            56: { task: "Spend 15 minutes drawing, doodling, or coloring in a physical book.", proof: "Photo of your finished page, doodle, or colored design." },
+            57: { task: "Solve a physical crossword, Sudoku, or word search puzzle.", proof: "Photo of the fully completed puzzle page in ink or pencil." },
+            58: { task: "Build something with your hands (Lego, clay, origami) during a break.", proof: "Photo of your finished mini physical creation." },
+            59: { task: "Write down your thoughts or stream-of-consciousness in a journal.", proof: "Photo of your handwritten journal entry." },
+            60: { task: "Read one chapter of a fiction or non-academic book purely for fun.", proof: "Photo of the open book resting in your lap or desk." },
+            61: { task: "Learn 5 basic conversational phrases in a brand-new language.", proof: "Screenshot of your completed daily lesson screen on Duolingo." },
+            62: { task: "Practice playing a musical instrument or singing for 15 minutes.", proof: "Photo of your instrument setup or sheet music out on display." },
+            63: { task: "Write down a list of 3 non-academic things you are grateful for today.", proof: "Photo of the list in your notebook or digital notes app." },
+            64: { task: "Write a letter of encouragement to your future self for exam week.", proof: "Photo of the sealed envelope or document file layout." },
+            65: { task: "Brain-dump every single thought, stressor, and task onto a blank piece of paper.", proof: "Photo of your messy, written mind-map page." },
+            66: { task: "List your top 3 personal strengths that have nothing to do with your grades.", proof: "Screenshot or photo of your written list of personal values." },
+            67: { task: "Wash, dry, and put away all dirty dishes immediately after cooking.", proof: "Photo of your completely empty, clean kitchen sink." },
+            68: { task: "Organize your shoe rack or entryway closet.", proof: "Photo of your shoes lined up neatly by the doorway." },
+            69: { task: "Clean your bathroom sink and wipe down the mirror.", proof: "Photo of your clean, streak-free bathroom vanity mirror." },
+            70: { task: "Prepare your backpack with an emergency kit (band-aids, mints, pain relief).", proof: "Photo of the small pouch contents organized together." },
+            71: { task: "Use a reusable tote bag instead of buying a plastic bag at the store.", proof: "Photo of your groceries packed inside a cloth reusable tote bag." },
+            72: { task: "Carry your own reusable metal straw and cutlery set to campus.", proof: "Photo of your travel utility kit resting inside your backpack." },
+            73: { task: "Walk or use a scooter/bicycle for an errand under 1.5 kilometers.", proof: "Photo of your destination storefront or your bicycle route tracking map." },
+            74: { task: "Use a reusable travel mug to get your coffee/tea at a campus cafe.", proof: "Photo of your personal mug being filled or resting on the counter." },
+            75: { task: "Print your study readings double-sided or read them entirely digitally.", proof: "Photo of the double-sided printed paper or an open PDF markup screen." },
+            76: { task: "Spend 20 minutes sitting under a tree on campus without using your phone.", proof: "Photo looking straight up through the green tree leaves from your seat." },
+            77: { task: "Water your room plants or help tend a campus garden.", proof: "Photo of you watering your indoor plants or holding a watering can." },
+            78: { task: "Take a photo of 3 beautiful things you notice in nature on your walk.", proof: "A collage image containing photos of flowers, leaves, or skies from today." },
+            79: { task: "Write down 3 short-term goals you want to achieve by the end of next month.", proof: "Photo of the bullet points written out in your planner." },
+            80: { task: "Wear your favorite outfit to class just to boost your self-confidence.", proof: "A mirror selfie showing off your favorite outfit layout." },
+            81: { task: "Spend an hour completely guilt-free playing your favorite video game.", proof: "Photo of your game controller or monitor screen active interface." },
+            82: { task: "Buy yourself a small, affordable reward (like a treat or sticker) for trying hard.", proof: "Photo of your treat alongside the retail store paper receipt." }
+        };
+
+        const hardTasks = {
+            83: { task: "Map out all your major assignment due dates for the semester.", proof: "Screenshot of your updated digital calendar." },
+            84: { task: "Schedule a specific 'no-study' rest day this week.", proof: "Screenshot of a calendar event labeled 'Rest/Recharge Day.'" },
+            85: { task: "Log out of all social media accounts on your computer during finals.", proof: "Screenshot of the login screens for Instagram or TikTok on your browser." },
+            86: { task: "Create a color-coded study timetable for exam week.", proof: "Export or screenshot of your weekly color-coded schedule." },
+            87: { task: "Check your weekly screen time and reduce it by 10%.", proof: "Screenshot comparing last week's screen time report to this week's." },
+            88: { task: "Set a hard 'App Limit' for TikTok, Instagram, or YouTube.", proof: "Screenshot of your phone's native Screen Time settings page showing active limits." },
+            89: { task: "Clean up your desktop by archiving loose assignment files.", proof: "Before-and-after screenshots of your clean computer desktop." },
+            90: { task: "Organize your Google Drive or OneDrive into neat semester folders.", proof: "Screenshot of your neatly organized digital folder tree." },
+            91: { task: "Track your sleep for one night and hit over 7 hours.", proof: "Screenshot of your sleep tracker data." },
+            92: { task: "Track every dollar you spent over the last 7 days.", proof: "Screenshot of your spreadsheet, notes app, or budgeting app chart." },
+            93: { task: "De-clutter your heavy school backpack or tote bag.", proof: "Photo of all contents laid out neatly, with trash discarded." },
+            94: { task: "Organize your physical textbooks, notebooks, and binders on a shelf.", proof: "Photo of your neat, lined-up physical academic resources." },
+            95: { task: "Pack your lunch instead of buying overpriced campus fast food.", proof: "Photo of your homemade lunch box or meal prep container." },
+            96: { task: "Eat a breakfast that includes a protein source.", proof: "Photo of your breakfast (e.g., eggs, oatmeal with nuts, Greek yogurt)." },
+            97: { task: "Take a brisk 15-minute walk outside around campus between lectures.", proof: "Selfie or scenery photo taken from a campus pathway or courtyard." },
+            98: { task: "Eat 3 different colored vegetables during your dinner.", proof: "Photo of your dinner plate showing a colorful vegetable mix." },
+            99: { task: "Call a parent, guardian, or family member just to chat and catch up.", proof: "Screenshot of your call log history showing a call duration over 5 minutes." },
+            100: { task: "Attend a student club meeting, social event, or campus activity.", proof: "Photo of the event flyer, room entryway, or the active meeting group." },
+            101: { task: "Attend a campus sports game or match to support your school.", proof: "Photo from the spectator stands or field boundaries." },
+            102: { task: "Visit your professor or TA during their scheduled office hours.", proof: "Photo of the professor's office door number or a signed slip." },
+            103: { task: "Locate and visit your campus student wellness/counseling center.", proof: "Photo of the building exterior or the department's reception sign." },
+            104: { task: "Borrow a physical book or resource from the campus library.", proof: "Photo of the checked-out library book with its date stamp or receipt." },
+            105: { task: "Register or check in for a campus career fair or networking workshop.", proof: "Screenshot of your registration ticket or badge code." },
+            106: { task: "Listen to an educational or self-growth podcast episode.", proof: "Screenshot of the 'episode completed' screen on Spotify/Apple Podcasts." },
+            107: { task: "Watch a documentary about a topic completely unrelated to your major.", proof: "Photo of your TV or laptop screen showing the active documentary playing." },
+            108: { task: "Do a load of laundry, fold it, and put it away inside your closet.", proof: "Photo of your neatly folded clothes resting inside drawers or closets." },
+            109: { task: "Vacuum, sweep, or mop your bedroom or dorm floor.", proof: "Photo of your clean floor space or the vacuum cleaner standing in the room." },
+            110: { task: "Clean out expired leftovers or old food containers from your fridge.", proof: "Photo of your organized, cleaned refrigerator shelves." },
+            111: { task: "Take out your recycling bag to the designated sorting bins.", proof: "Photo of your sorted recycling dropped at the campus/housing bins." },
+            112: { task: "Sew a loose button back onto a clothing piece or patch a small hole.", proof: "Close-up before-and-after photos of the repaired clothing item." },
+            113: { task: "Watch a winter coat, bedding, or heavy blanket.", proof: "Photo of the items spinning inside the washing machine or drying." },
+            114: { task: "Donate textbooks or old prep books to a younger student or library.", proof: "Photo of the drop-off container or passing books to a peer." },
+            115: { task: "Watch a sunrise or sunset completely from start to finish.", proof: "Photo of the colorful morning or evening horizon line." },
+            116: { task: "Update your LinkedIn profile with your current semester details or projects.", proof: "Screenshot of your updated, active profile section." },
+            117: { task: "Draft a clean, single-page master resume layout.", proof: "Screenshot or PDF file view of your formatted resume template." },
+            118: { task: "Take a long, hot shower or relaxing bath after completing a massive test.", proof: "Photo of your fluffy clean towel or a steaming bathroom doorway." },
+            119: { task: "Cook your absolute favorite comfort meal from scratch at home.", proof: "Photo of your home-cooked comforting plate." },
+            120: { task: "Review your long-term 5-year vision board or life goals document.", proof: "Screenshot of your open vision board file or a photo of your printed life goals manifesto." }
+        };
+
+        // Standardized unified pool generation
+        const tasks = {};
+        Object.keys(easyTasks).forEach(k => { tasks[k] = { title: easyTasks[k].task, description: easyTasks[k].proof, xp: 20 }; });
+        Object.keys(mediumTasks).forEach(k => { tasks[k] = { title: mediumTasks[k].task, description: mediumTasks[k].proof, xp: 40 }; });
+        Object.keys(hardTasks).forEach(k => { tasks[k] = { title: hardTasks[k].task, description: hardTasks[k].proof, xp: 60 }; });
+
+        class ParticleEngine {
+            constructor() {
+                this.canvas = document.getElementById('confetti-canvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.particles = [];
+                this.colors = ['#58cc02', '#ff9600', '#ce82ff', '#1cb0f6', '#ff4b4b'];
+                this.resize();
+                window.addEventListener('resize', () => this.resize());
+                this.animate();
+            }
+            resize() { this.canvas.width = window.innerWidth; this.canvas.height = window.innerHeight; }
+            fire() {
+                const centerX = window.innerWidth / 2;
+                const centerY = window.innerHeight / 3;
+                for(let i = 0; i < 100; i++) {
+                    this.particles.push({
+                        x: centerX, y: centerY,
+                        vx: (Math.random() - 0.5) * 20, vy: (Math.random() - 1) * 20,
+                        size: Math.random() * 8 + 4,
+                        color: this.colors[Math.floor(Math.random() * this.colors.length)],
+                        gravity: 0.5, rotation: Math.random() * 360, rotationSpeed: (Math.random() - 0.5) * 10
+                    });
+                }
+            }
+            animate() {
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                for(let i = this.particles.length - 1; i >= 0; i--) {
+                    let p = this.particles[i];
+                    p.vy += p.gravity; p.x += p.vx; p.y += p.vy; p.rotation += p.rotationSpeed;
+                    this.ctx.save();
+                    this.ctx.translate(p.x, p.y); this.ctx.rotate(p.rotation * Math.PI / 180);
+                    this.ctx.fillStyle = p.color; this.ctx.fillRect(-p.size/2, -p.size/2, p.size, p.size);
+                    this.ctx.restore();
+                    if(p.y > this.canvas.height) this.particles.splice(i, 1);
+                }
+                requestAnimationFrame(() => this.animate());
+            }
+        }
+
+        class VideoEngine {
+            constructor() {
+                this.videoElement = document.getElementById('tree-video');
+                this.errorDisplay = document.getElementById('video-error');
+                this.checkInterval = null;
+                this.bindEvents();
+            }
+            bindEvents() {
+                this.videoElement.addEventListener('error', (e) => {
+                    console.error("Video Engine Error", e);
+                    this.errorDisplay.classList.add('visible');
+                }, true);
+            }
+            initStage(stageNumber) {
+                const data = CONFIG.stageTimestamps[stageNumber];
+                if (!data) return;
+                if (this.videoElement.readyState >= 1) {
+                    this.videoElement.currentTime = data.start;
+                } else {
+                    this.videoElement.addEventListener('loadedmetadata', () => {
+                        this.videoElement.currentTime = data.start;
+                    }, { once: true });
+                }
+            }
+            playSegment(stageNumber) {
+                const targetTimes = CONFIG.stageTimestamps[stageNumber];
+                if (!targetTimes) return;
+                this.videoElement.currentTime = targetTimes.start;
+                let playPromise = this.videoElement.play();
+                if (playPromise !== undefined) { playPromise.catch(err => console.warn(err)); }
+                if (this.checkInterval) clearInterval(this.checkInterval);
+                this.checkInterval = setInterval(() => {
+                    if (this.videoElement.currentTime >= targetTimes.end) {
+                        this.videoElement.pause();
+                        clearInterval(this.checkInterval);
+                    }
+                }, 30);
+            }
+        }
+
+        class AppManager {
+            constructor() {
+                this.currentXP = 0;
+                this.activeTaskTarget = null;
+                
+                this.dbState = {
+                    user_id: "00000000-0000-0000-0000-000000000000",
+                    tree_stage: 1,
+                    completed_history: {}, 
+                    daily_tasks: [],       
+                    last_reset_date: ""    
+                };
+
+                this.particles = new ParticleEngine();
+                this.videoEngine = new VideoEngine();
+                
+                this.domElements = {
+                    feed: document.getElementById('task-feed'),
+                    cameraInput: document.getElementById('camera-bridge'),
+                    overlay: document.getElementById('loader-overlay'),
+                    loaderText: document.getElementById('loader-text'),
+                    xpBar: document.getElementById('xp-bar'),
+                    xpText: document.getElementById('xp-text'),
+                    alertBackdrop: document.getElementById('custom-alert-backdrop'),
+                    alertTitle: document.getElementById('custom-alert-title'),
+                    alertMessage: document.getElementById('custom-alert-message'),
+                    stageName: document.getElementById('stage-display-name')
+                };
+
+                this.bindEvents();
+                this.initialize();
+            }
+
+            bindEvents() {
+                this.domElements.cameraInput.addEventListener('change', () => this.handleImageUpload());
+            }
+
+            async initialize() {
+                await this.loadRowFromDatabase();
+                this.videoEngine.initStage(this.dbState.tree_stage);
+                this.checkDailyRotation();
+            }
+
+            async loadRowFromDatabase() {
+                const storedState = localStorage.getItem('app_db_row');
+                if (storedState) {
+                    try {
+                        this.dbState = JSON.parse(storedState);
+                    } catch (e) {
+                        console.error("Malformed row structure, resetting parameters.", e);
+                    }
+                } else {
+                    this.dbState.tree_stage = 1;
+                    this.dbState.completed_history = { current_xp: 0 };
+                    this.dbState.daily_tasks = [];
+                    this.dbState.last_reset_date = "";
+                    this.saveRowToDatabase();
+                }
+                
+                if (this.dbState.completed_history.current_xp === undefined) {
+                    this.dbState.completed_history.current_xp = 0;
+                }
+                this.currentXP = parseInt(this.dbState.completed_history.current_xp) || 0;
+            }
+
+            async saveRowToDatabase() {
+                this.dbState.completed_history.current_xp = this.currentXP;
+                localStorage.setItem('app_db_row', JSON.stringify(this.dbState));
+            }
+
+            checkDailyRotation() {
+                const todayStr = new Date().toISOString().split('T')[0];
+                
+                if (this.dbState.last_reset_date !== todayStr || !this.dbState.daily_tasks || this.dbState.daily_tasks.length === 0) {
+                    this.randomizeTasks(todayStr);
+                } else {
+                    this.renderTasksFeed();
+                }
+                this.updateUI();
+            }
+
+            randomizeTasks(dateString) {
+                Object.keys(tasks).forEach(key => {
+                    if (tasks[key].completed === undefined) {
+                        tasks[key].completed = false;
+                    }
+                });
+
+                const keys = Object.keys(tasks);
+                const numToPick = Math.min(5, keys.length);
+                const randomKeys = [];
+
+                while (randomKeys.length < numToPick) {
+                    const randomKey = keys[Math.floor(Math.random() * keys.length)];
+                    if (!randomKeys.includes(randomKey)) {
+                        randomKeys.push(randomKey);
+                    }
+                }
+
+                const selectedTasks = randomKeys.map(key => {
+                    return {
+                        id: parseInt(key),
+                        title: tasks[key].title,
+                        description: tasks[key].description,
+                        xp: tasks[key].xp,
+                        completed: false,
+                        feedback: ""
+                    };
+                });
+
+                this.dbState.daily_tasks = selectedTasks;
+                this.dbState.last_reset_date = dateString;
+                
+                this.saveRowToDatabase();
+                this.renderTasksFeed();
+            }
+
+            renderTasksFeed() {
+                this.domElements.feed.innerHTML = '';
+                this.dbState.daily_tasks.forEach((task, index) => {
+                    this.renderTask(task, index);
+                });
+            }
+
+            renderTask(taskData, index) {
+                const delay = (index * 0.1) + "s";
+                const isCompleted = taskData.completed ? 'completed' : '';
+                const buttonContent = taskData.completed 
+                    ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Verified`
+                    : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg> Verify`;
+                const disabledAttr = taskData.completed ? 'disabled' : '';
+                const buttonClass = taskData.completed ? 'action-camera-btn verified' : 'action-camera-btn';
+                const feedbackHtml = taskData.feedback ? `<span class="pro-feedback">${taskData.feedback}</span>` : '';
+
+                const taskHtml = `
+                    <div class="minimal-task-card ${isCompleted}" id="quest-${taskData.id}" data-xp="${taskData.xp}" style="animation-delay: ${delay};">
+                        <div class="task-info-block">
+                            <div class="task-icon">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                            </div>
+                            <div class="task-headline">
+                                <h4>${taskData.title}</h4>
+                                <p id="desc-${taskData.id}"><span class="xp-label">+${taskData.xp} XP</span> • ${taskData.description}</p>
+                                ${feedbackHtml}
+                            </div>
+                        </div>
+                        <button class="${buttonClass}" onclick="app.triggerCamera(${taskData.id})" ${disabledAttr}>
+                            ${buttonContent}
+                        </button>
+                    </div>
+                `;
+                this.domElements.feed.insertAdjacentHTML('beforeend', taskHtml);
+            }
+
+            showAlert(title, message) {
+                this.domElements.alertTitle.innerText = title;
+                this.domElements.alertMessage.innerText = message;
+                this.domElements.alertBackdrop.style.display = 'flex';
+                const alertModal = this.domElements.alertBackdrop.querySelector('.modal');
+                alertModal.style.animation = 'popIn 0.4s var(--bounce-easing) forwards';
+            }
+            
+            closeAlert() {
+                const alertModal = this.domElements.alertBackdrop.querySelector('.modal');
+                alertModal.style.animation = 'popOut 0.3s var(--smooth-easing) forwards';
+                setTimeout(() => {
+                    this.domElements.alertBackdrop.style.display = 'none';
+                    alertModal.style.animation = '';
+                }, 300);
+            }
+
+            triggerCamera(taskId) {
+                this.activeTaskTarget = taskId;
+                this.domElements.cameraInput.click();
+            }
+
+            handleImageUpload() {
+                const file = this.domElements.cameraInput.files[0];
+                if (!file) return;
+
+                this.domElements.loaderText.innerText = "Analyzing Submission...";
+                this.domElements.overlay.style.display = 'flex';
+
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    const base64Data = event.target.result.split(',')[1];
+                    await this.verifySubmissionWithAI(base64Data, this.activeTaskTarget);
+                };
+                reader.readAsDataURL(file);
+            }
+
+            async verifySubmissionWithAI(base64Data, taskId) {
+                const task = this.dbState.daily_tasks.find(t => t.id === taskId);
+                if (!task) return;
+                
+                try {
+                    this.domElements.loaderText.innerText = "Evaluating submission...";
+                    
+                    const response = await fetch("/api/verify", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            base64Data: base64Data,
+                            title: task.title,
+                            description: task.description
+                        })
+                    });
+
+                    // Parse the JSON payload safely
+                    const payload = await response.json().catch(() => ({}));
+
+                    // If the Python server threw an error, catch it here and show the real message
+                    if (!response.ok) {
+                        throw new Error(payload.error || `Server status code: ${response.status}`);
+                    }
+                    
+                    if (!payload.choices || !payload.choices[0]) {
+                        throw new Error("Invalid response structure from AI API.");
+                    }
+
+                    const jsonString = payload.choices[0].message.content.replace(/```json/g, '').replace(/```/g, '').trim();
+                    const evaluation = JSON.parse(jsonString);
+
+                    this.domElements.overlay.style.display = 'none';
+
+                    if (evaluation.verified === true) {
+                        this.processTaskCompletion(taskId, evaluation.professional_feedback);
+                    } else {
+                        this.showAlert("Verification Failed", evaluation.professional_feedback);
+                    }
+
+                } catch (error) {
+                    console.error(error);
+                    this.domElements.overlay.style.display = 'none';
+                    // Displays the actual problem (like token issues or API rejections)
+                    this.showAlert("System Error Details", error.message);
+                } finally {
+                    this.domElements.cameraInput.value = "";
+                }
+            }
+
+            processTaskCompletion(taskId, professionalFeedback) {
+                const task = this.dbState.daily_tasks.find(t => t.id === taskId);
+                if (!task || task.completed) return;
+
+                task.completed = true;
+                task.feedback = professionalFeedback;
+                
+                this.dbState.completed_history[taskId] = {
+                    timestamp: new Date().toISOString(),
+                    feedback: professionalFeedback,
+                    reset_cycle_date: this.dbState.last_reset_date
+                };
+
+                const card = document.getElementById(`quest-${taskId}`);
+                if (card) {
+                    const btn = card.querySelector('.action-camera-btn');
+                    btn.disabled = true;
+                    btn.className = "action-camera-btn verified";
+                    btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Verified`;
+                    card.classList.add('completed');
+
+                    const headlineBlock = card.querySelector('.task-headline');
+                    headlineBlock.insertAdjacentHTML('beforeend', `<span class="pro-feedback">${professionalFeedback}</span>`);
+                }
+
+                this.awardXP(parseInt(task.xp));
+            }
+
+            awardXP(amount) {
+                this.currentXP += amount;
+                if (this.currentXP >= CONFIG.maxXP && this.dbState.tree_stage < CONFIG.maxStage) {
+                    this.currentXP -= CONFIG.maxXP;
+                    this.levelUp();
+                } else if (this.dbState.tree_stage >= CONFIG.maxStage && this.currentXP >= CONFIG.maxXP) {
+                    this.currentXP = CONFIG.maxXP;
+                }
+                this.updateUI();
+                this.saveRowToDatabase();
+            }
+
+            levelUp() {
+                this.dbState.tree_stage++;
+                this.particles.fire();
+                this.videoEngine.playSegment(this.dbState.tree_stage);
+            }
+
+            updateUI() {
+                const progressPercentage = Math.min((this.currentXP / CONFIG.maxXP) * 100, 100);
+                this.domElements.xpBar.style.width = `${progressPercentage}%`;
+                this.domElements.xpText.innerText = `${this.currentXP} / ${CONFIG.maxXP} XP`;
+                
+                const planNames = { 1: "Evergreen Oak", 2: "Sprouting Willow", 3: "Acacia Core", 4: "Prismatic Sequoia" };
+                this.domElements.stageName.innerText = planNames[this.dbState.tree_stage] || "Evergreen Oak";
+            }
+        }
+
+        const app = new AppManager();
+    </script>
+</body>
+</html>
